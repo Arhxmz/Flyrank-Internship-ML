@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Refresh / Content Opportunity Scoring — FlyRank ML Internship Capstone</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; max-width: 780px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #1a1a1a; background: #fdfdfb; }
+  h1 { font-size: 1.8em; margin-bottom: 0.2em; }
+  h2 { border-bottom: 2px solid #ddd; padding-bottom: 6px; margin-top: 2em; }
+  .meta { color: #666; font-size: 0.95em; margin-bottom: 2em; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
+  th { background: #f2f2f2; }
+  img { max-width: 100%; border: 1px solid #ddd; margin: 1em 0; }
+  code { background: #f2f2f2; padding: 2px 5px; border-radius: 3px; }
+  .checklist { background: #f7f7f2; border-left: 4px solid #999; padding: 12px 18px; font-size: 0.9em; }
+  footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd; font-size: 0.9em; color: #666; }
+  a { color: #2a5db0; }
+</style>
+</head>
+<body>
+
+<h1>Refresh / Content Opportunity Scoring</h1>
+<p class="meta">
+  <strong>Author:</strong> Muhammad Arham Hassan &nbsp;|&nbsp;
+  <strong>Lane:</strong> Refresh / Content Opportunity Scoring &nbsp;|&nbsp;
+  <strong>Repo:</strong> <a href="https://github.com/Arhxmz/Flyrank-Internship-ML">github.com/Arhxmz/Flyrank-Internship-ML</a> &nbsp;|&nbsp;
+  <strong>Date:</strong> September 19, 2026
+</p>
+
+<h2>Abstract</h2>
+<p>Which published client pages are likely to decline in organic search traffic, and should be prioritized for editorial refresh? Using February 2026 search performance signals to predict March 2026 click decline on FlyRank's anonymized content warehouse, a gradient-boosted classifier was trained and validated against a transparent visibility-based baseline on a client-grouped, zero-overlap test split. The model reached 0.907 AUC and 63.8% Precision@10%, versus 0.721 AUC and 32.1% Precision@10% for the baseline — nearly doubling the hit rate editors would see in the top of a prioritized queue. The output is a ranked action playbook with reason codes, intended to direct limited editorial review time toward the pages most likely to need it.</p>
+
+<h2>1. Problem Framing</h2>
+<p><strong>Decision:</strong> which pages get queued for editorial refresh this cycle, versus left alone.<br>
+<strong>Unit of analysis:</strong> one published content page, for one client, aggregated over a month.<br>
+<strong>Output:</strong> a ranked score and a three-tier action label (refresh_priority / monitor / no_action) with a reason code.<br>
+<strong>Action:</strong> an SEO editor reviews flagged pages, updates outdated facts, improves depth, re-optimizes on-page elements.<br>
+<strong>Cost of a wrong call:</strong> a false positive wastes editorial time on a page that didn't need it; a false negative lets real organic traffic loss go unaddressed for another cycle.<br>
+<strong>Why ML helps:</strong> dozens of interacting signals (position, clicks, impressions, staleness) don't reduce to a single hand-written threshold, and their relationships likely differ across content types and clients.</p>
+
+<h2>2. Data Safety</h2>
+<p>Data source: FlyRank ML Internship warehouse (<code>FlyRank/internship-warehouse</code>), an anonymized release of real search performance data. Table used: <code>fact_content_daily_performance</code>. February 2026 was used for features, March 2026 for the outcome — the dataset's final month (June 2026) was never touched, reserved as a sealed test window.</p>
+<p>Deliberately excluded: FlyRank's own product-computed decision fields (<code>health_score</code>, <code>priority_score</code>, <code>action_type</code>) — outputs of an existing rule-based system, never used as inputs. <code>dim_content</code>'s update-date field was excluded entirely after testing revealed it reflects each page's <em>current</em> state rather than a true point-in-time snapshot.</p>
+<p>All identifiers are salted hash keys, used only for grouping and joins, never as model features. No client names, domains, URLs, or private queries appear anywhere in this repo.</p>
+
+<h2>3. Baseline</h2>
+<p>Built in Week 4: <code>stale_but_visible = is_stale × has_visibility × impressions</code>. Verified on real bucket tables: staleness confirmed against click volume (2.92 → 0.98 → 0.10 avg clicks across freshness buckets), CTR-vs-position confirmed against the CTR-fix logic's assumption (1.06% → 0.09% CTR across position buckets).</p>
+<p>For this model comparison, the baseline is represented by its visibility component alone — ranking by raw February impressions — scored on the identical held-out test set as the model.</p>
+
+<h2>4. Model / Analysis</h2>
+<p><strong>Method:</strong> HistGradientBoostingClassifier (scikit-learn) — handles missing values (sparse GA4 coverage) natively.<br>
+<strong>Features:</strong> average search position, February clicks, February impressions — all aggregated before the March label window.<br>
+<strong>Label:</strong> a page is "declining" if March total clicks fall below 80% of February total clicks.</p>
+
+<h2>5. Evaluation</h2>
+<p>Split: grouped by client (70/30), confirmed <strong>zero</strong> client overlap between train and test.</p>
+<table>
+  <tr><th>Metric</th><th>Baseline (visibility-only)</th><th>Model</th><th>Improvement</th></tr>
+  <tr><td>AUC</td><td>0.721</td><td>0.907</td><td>+0.186</td></tr>
+  <tr><td>Precision@10%</td><td>0.321</td><td>0.638</td><td>+0.317</td></tr>
+</table>
+<p>Base rate of decline: 16.2%.</p>
+<img src="assets/model_vs_baseline.png" alt="Model vs baseline chart">
+<p><strong>Error analysis:</strong> reviewing the model's own top-ranked output surfaced a real weakness — many of the highest-confidence "declining" pages had near-zero February clicks, meaning a drop from 1 click to 0 technically satisfies the label but isn't meaningful decline. A production version would need a minimum traffic floor before a page is eligible for the "declining" label at all.</p>
+
+<h2>6. Interpretation</h2>
+<p>The model substantially outperforms a visibility-only rule, suggesting position and click/impression patterns together carry more signal than raw visibility alone. The largest practical gain is in Precision@10%: on the realistic slice of pages an editor would actually review, the model's picks are correct roughly twice as often as the baseline's. A genuine data limitation — not a modeling failure — removed a confirmed real signal (staleness) from this particular model, since the warehouse's update-date field could not be trusted as a point-in-time snapshot.</p>
+
+<h2>7. Recommendation</h2>
+<p>Ranked output in three tiers: <strong>refresh_priority</strong> (probability ≥ 0.70, 3,009 pages), <strong>monitor</strong> (0.40–0.70, 13,154 pages), <strong>no_action</strong> (&lt; 0.40, 118,075 pages).</p>
+<img src="assets/action_tier_breakdown.png" alt="Action tier breakdown chart">
+<p>Every flagged page carries a reason code (<code>predicted_decline_risk</code>) and its probability. This ranks <em>where</em> editorial attention is best spent; it does not claim refreshing a page will reverse its trend, and does not predict Google's algorithm. Before production use, a minimum traffic floor should be added to filter the near-zero-click noise identified above.</p>
+
+<h2>8. Reproducibility</h2>
+<p>Repo: <a href="https://github.com/Arhxmz/Flyrank-Internship-ML">github.com/Arhxmz/Flyrank-Internship-ML</a><br>
+Notebook: <code>work/notebooks/capstone.ipynb</code> — runs top to bottom from a fresh kernel with no errors.<br>
+Data access: requires a Hugging Face <code>HF_TOKEN</code> (read-only, gated dataset), entered via <code>getpass</code> at runtime — never stored in the repo.<br>
+Random seed: <code>random_state=42</code> throughout.<br>
+Artifacts: <code>work/outputs/model_vs_baseline.png</code>, <code>work/outputs/action_tier_breakdown.png</code>, <code>work/outputs/top10_for_paper.json</code> — all committed, all regenerated by the notebook.</p>
+
+<h2>9. Acknowledgments &amp; Data Credit</h2>
+<p>Built on the FlyRank ML Internship dataset — <a href="https://flyrank.ai">flyrank.ai</a></p>
+
+<div class="checklist">
+<strong>Claims checklist:</strong> all claims above are observed, measured, directional, or decision-support language — no causal claims, no "predicted Google's algorithm," no client-identifying details. Base rate (16.2%) is reported alongside Precision@10% so the improvement isn't mistaken for a high score inflated by class imbalance.
+</div>
+
+<footer>Full methodology, code, and evaluation: see the <a href="https://github.com/Arhxmz/Flyrank-Internship-ML/blob/main/work/capstone_report.md">written report</a> and <a href="https://github.com/Arhxmz/Flyrank-Internship-ML/blob/main/work/notebooks/capstone.ipynb">capstone notebook</a> in the repo.</footer>
+
+</body>
+</html>
